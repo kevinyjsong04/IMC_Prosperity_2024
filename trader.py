@@ -7,6 +7,8 @@ import math
 import copy
 import numpy as np
 
+
+
 empty_dict = {'CHOCOLATE' : 0, 'STRAWBERRY': 0, 'ROSE' : 0, 'GIFT_BASKET' : 0}
 
 
@@ -24,18 +26,108 @@ class Trader:
     person_position = defaultdict(def_value)
     person_actvalof_position = defaultdict(def_value)
 
+    cpnl = defaultdict(lambda : 0)
+    steps = 0
+    cont_buy_basket_unfill = 0
+    cont_sell_basket_unfill = 0
+    
+    begin_diff_dip = -INF
+    begin_diff_bag = -INF
+    begin_bag_price = -INF
+    begin_dip_price = -INF
+
+    basket_std = 117
+
+    def values_extract(self, order_dict, buy=0):
+        tot_vol = 0
+        best_val = -1
+        mxvol = -1
+
+        for ask, vol in order_dict.items():
+            if(buy==0):
+                vol *= -1
+            tot_vol += vol
+            if tot_vol > mxvol:
+                mxvol = vol
+                best_val = ask
+        
+        return tot_vol, best_val
+    
+    
+    def compute_orders_basket(self, order_depth):
+
+        orders = {'CHOCOLATE': [], 'STRAWBERRY': [], 'ROSE': [], 'GIFT_BASKET': []}
+        prods = ['CHOCOLATE', 'STRAWBERRY', 'ROSE', 'GIFT_BASKET']
+        osell, obuy, best_sell, best_buy, worst_sell, worst_buy, mid_price, vol_buy, vol_sell = {}, {}, {}, {}, {}, {}, {}, {}, {}
+
+        for p in prods:
+            osell[p] = collections.OrderedDict(sorted(order_depth[p].sell_orders.items()))
+            obuy[p] = collections.OrderedDict(sorted(order_depth[p].buy_orders.items(), reverse=True))
+
+            best_sell[p] = next(iter(osell[p]))
+            best_buy[p] = next(iter(obuy[p]))
+
+            worst_sell[p] = next(reversed(osell[p]))
+            worst_buy[p] = next(reversed(obuy[p]))
+
+            mid_price[p] = (best_sell[p] + best_buy[p])/2
+            vol_buy[p], vol_sell[p] = 0, 0
+            for price, vol in obuy[p].items():
+                vol_buy[p] += vol 
+                if vol_buy[p] >= self.POSITION_LIMIT[p]/10:
+                    break
+            for price, vol in osell[p].items():
+                vol_sell[p] += -vol 
+                if vol_sell[p] >= self.POSITION_LIMIT[p]/10:
+                    break
+
+        res_buy = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRY']*6 - mid_price['ROSE'] - 375
+        res_sell = mid_price['GIFT_BASKET'] - mid_price['CHOCOLATE']*4 - mid_price['STRAWBERRY']*6 - mid_price['ROSE'] - 375
+
+        trade_at = self.basket_std*0.5
+        close_at = self.basket_std*(-1000)
+
+        pb_pos = self.position['GIFT_BASKET']
+        pb_neg = self.position['GIFT_BASKET']
+
+        uku_pos = self.position['ROSE']
+        uku_neg = self.position['ROSE']
 
 
+        basket_buy_sig = 0
+        basket_sell_sig = 0
 
+        if self.position['GIFT_BASKET'] == self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_buy_basket_unfill = 0
+        if self.position['GIFT_BASKET'] == -self.POSITION_LIMIT['GIFT_BASKET']:
+            self.cont_sell_basket_unfill = 0
 
+        do_bask = 0
 
+        if res_sell > trade_at:
+            vol = self.position['GIFT_BASKET'] + self.POSITION_LIMIT['GIFT_BASKET']
+            self.cont_buy_basket_unfill = 0 # no need to buy rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_sell_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_buy['GIFT_BASKET'], -vol)) 
+                self.cont_sell_basket_unfill += 2
+                pb_neg -= vol
+                #uku_pos += vol
+        elif res_buy < -trade_at:
+            vol = self.POSITION_LIMIT['GIFT_BASKET'] - self.position['GIFT_BASKET']
+            self.cont_sell_basket_unfill = 0 # no need to sell rn
+            assert(vol >= 0)
+            if vol > 0:
+                do_bask = 1
+                basket_buy_sig = 1
+                orders['GIFT_BASKET'].append(Order('GIFT_BASKET', worst_sell['GIFT_BASKET'], vol))
+                self.cont_buy_basket_unfill += 2
+                pb_pos += vol
 
-
-
-
-
-
-
+        return orders
+    
 
 
     def run(self, state: TradingState) -> Dict[str, List[Order]]:
@@ -53,36 +145,11 @@ class Trader:
         for key, val in self.position.items():
             print(f'{key} position: {val}')
 
-        assert abs(self.position.get('UKULELE', 0)) <= self.POSITION_LIMIT['UKULELE']
+        assert abs(self.position.get('ROSE', 0)) <= self.POSITION_LIMIT['ROSE']
 
         timestamp = state.timestamp
-
-        if len(self.bananas_cache) == self.bananas_dim:
-            self.bananas_cache.pop(0)
-        if len(self.coconuts_cache) == self.coconuts_dim:
-            self.coconuts_cache.pop(0)
-
-        _, bs_bananas = self.values_extract(collections.OrderedDict(sorted(state.order_depths['BANANAS'].sell_orders.items())))
-        _, bb_bananas = self.values_extract(collections.OrderedDict(sorted(state.order_depths['BANANAS'].buy_orders.items(), reverse=True)), 1)
-
-        self.bananas_cache.append((bs_bananas+bb_bananas)/2)
-
+        
         INF = 1e9
-    
-        bananas_lb = -INF
-        bananas_ub = INF
-
-        if len(self.bananas_cache) == self.bananas_dim:
-            bananas_lb = self.calc_next_price_bananas()-1
-            bananas_ub = self.calc_next_price_bananas()+1
-
-        pearls_lb = 10000
-        pearls_ub = 10000
-
-        # CHANGE FROM HERE
-
-        acc_bid = {'PEARLS' : pearls_lb, 'BANANAS' : bananas_lb} # we want to buy at slightly below
-        acc_ask = {'PEARLS' : pearls_ub, 'BANANAS' : bananas_ub} # we want to sell at slightly above
 
         self.steps += 1
 
@@ -95,24 +162,11 @@ class Trader:
                 self.person_actvalof_position[trade.buyer][product] += trade.quantity
                 self.person_actvalof_position[trade.seller][product] += -trade.quantity
 
-        orders = self.compute_orders_c_and_pc(state.order_depths)
-        result['PINA_COLADAS'] += orders['PINA_COLADAS']
-        result['COCONUTS'] += orders['COCONUTS']
-        orders = self.compute_orders_dg(state.order_depths, state.observations)
-        result['DIVING_GEAR'] += orders['DIVING_GEAR']
-        orders = self.compute_orders_br(state.order_depths, state.timestamp)
-        result['BERRIES'] += orders['BERRIES']
-
         orders = self.compute_orders_basket(state.order_depths)
-        result['PICNIC_BASKET'] += orders['PICNIC_BASKET']
-        result['DIP'] += orders['DIP']
-        result['BAGUETTE'] += orders['BAGUETTE']
-        result['UKULELE'] += orders['UKULELE']
-
-        for product in ['PEARLS', 'BANANAS']:
-            order_depth: OrderDepth = state.order_depths[product]
-            orders = self.compute_orders(product, order_depth, acc_bid[product], acc_ask[product])
-            result[product] += orders
+        result['GIFT_BASKET'] += orders['GIFT_BASKET']
+        result['CHOCOLATE'] += orders['CHOCOLATE']
+        result['STRAWBERRY'] += orders['STRAWBERRY']
+        result['ROSE'] += orders['ROSE']
 
         for product in state.own_trades.keys():
             for trade in state.own_trades[product]:
@@ -138,16 +192,6 @@ class Trader:
                 settled_pnl += self.position[product] * best_sell
             totpnl += settled_pnl + self.cpnl[product]
             print(f"For product {product}, {settled_pnl + self.cpnl[product]}, {(settled_pnl+self.cpnl[product])/(self.volume_traded[product]+1e-20)}")
-
-        for person in self.person_position.keys():
-            for val in self.person_position[person].keys():
-                
-                if person == 'Olivia':
-                    self.person_position[person][val] *= 0.995
-                if person == 'Pablo':
-                    self.person_position[person][val] *= 0.8
-                if person == 'Camilla':
-                    self.person_position[person][val] *= 0
 
         print(f"Timestamp {timestamp}, Total PNL ended up being {totpnl}")
         # print(f'Will trade {result}')
