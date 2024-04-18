@@ -36,7 +36,7 @@ class Trader:
     begin_bag_price = -INF
     begin_dip_price = -INF
 
-    basket_std = 117
+    basket_std = 600
 
     def values_extract(self, order_dict, buy=0):
         tot_vol = 0
@@ -148,7 +148,7 @@ class Trader:
         assert abs(self.position.get('ROSE', 0)) <= self.POSITION_LIMIT['ROSE']
 
         timestamp = state.timestamp
-        
+
         INF = 1e9
 
         self.steps += 1
